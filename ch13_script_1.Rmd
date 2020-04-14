@@ -33,15 +33,41 @@ Here is the [chapter titled "Classification"](https://davidkane9.github.io/PPBDS
 The data has been taken from the National Election Survey. Note that both ideology and party are measured in 7 point scales. `ideology` ranges from Strong liberal (1) to Strong Conservative (7). `party` ranges from Strong Democrat (1) to Strong Republican (7). `income` is measured on a 5 point scale ranging from very poor (1) to very rich (5). You may treat these variables as continuous. `dvote`  is our outcome variable. It is whether (1) or not (0) the person prefers the Democratic candidate for President
 
 
+
 **Prompt:**
 
 Explore the data and see the variables for yourself. See if anything looks strange in the summary.
 
+```{r}
+nes %>% skim()
+```
 Create a scatterplot of our outcome variable `dvote` and a continuous predictor `income`. 
+
+```{r}
+ggplot(nes, aes(x = income, y = dvote)) +
+  geom_point() +
+  theme_classic()
+```
+
 
 You might notice `geom_point()` doesn't give an intuitive graph since the points are so distinct. Try `geom_jitter()` instead. Use the arguments `alpha` and `height` to improve your plot.
 
+```{r}
+ggplot(nes, aes(x = income, y = dvote)) +
+  geom_jitter(alpha = 0.5, height = 0.3) +
+  theme_classic()
+```
+
+
 Draw a regression line through this jittered data using `geom_smooth()`.
+
+```{r}
+ggplot(nes, aes(x = income, y = dvote)) +
+  geom_jitter(alpha = 0.5, height = 0.4) +
+  geom_smooth(method = 'lm', se = FALSE) +
+  theme_classic()
+```
+
 
 Discuss whether a linear regression is appropriate for this. Is there a possibility of model predicting greater than 1 or less than 0 probability for `dvote`?
 
@@ -52,16 +78,32 @@ Discuss whether a linear regression is appropriate for this. Is there a possibil
 
 We first fit the logistic regression model using the `glm(y ~ x1 + x2, family, data)` function and save it as `model_1`.  
 
-We get the regression parameter estimates by applying the `tidy()` function from the broom package to `model_1`. Print the `term`, `estimate`, `conf.low`, and `conf.high` columns.  
+```{r}
+model_1 <- glm(dvote ~ gender + income, family = "binomial", data = nes)
+```
+
+
+We get the regression parameter estimates by applying the `tidy()` function from the broom package to `model_1`. Print the `term`, `estimate`, `conf.low`, and `conf.high` columns. 
+
+```{r}
+model_1 %>%
+  tidy(conf.int = TRUE) %>%
+  select(term, estimate, conf.low, conf.high)
+```
 
 Interpret the `estimate` column for "gendermale" and "income". Use the [divide-by-four rule](https://davidkane9.github.io/PPBDS/13-classification.html#one-categorical-explanatory-variable).
 
+The maximum predicted decrease in probability of voting for Democrats due to someone being male is roughly `r -0.159/4`. The maximum decrease due to someone moving to a higher income bracket is roughly `r -0.288/4`.
+
 Provide a Bayesian and a Frequentist interpretation of the confidence intervals for the estimate of the coefficient for `income`.
+
+In the Bayesian interpretation, the true logistic coefficient for income has a 95% chance of being within the bounds of the confidence interval. In the Frequentist interpretation, if we took infinitely many samples, the coefficient for income in 95% of them would be within the interval.
 
 Explain to your non-mathematical boss the relationship between income and preference for the Democratic candidate. Write this out as a sentence. Harder than it seems, isn't it?
 
-Optional (very hard!): Interpret the `estimate` for (Intercept). What does it mean? Think back to how we interpreted regression intercepts in the last two weeks. You *might* need to use the `qlogis()` function.
+People in higher income brackets are less likely to vote for Democratic presidential candidates.
 
+Optional (very hard!): Interpret the `estimate` for (Intercept). What does it mean? Think back to how we interpreted regression intercepts in the last two weeks. You *might* need to use the `qlogis()` function.
 
 
 
@@ -71,11 +113,26 @@ Optional (very hard!): Interpret the `estimate` for (Intercept). What does it me
 
 Use `augment()` from the **broom** package to get predictions from our model. You will need to set the `type.predict` and `data` arguments correctly.
 
+```{r}
+model_1 %>%
+  augment(type.predict = "response")
+```
+
+
 What does the `.fitted` column means?
+
+The prdicted probabilities of voting for democratic presidential candidates for individual observations within the dataset. 
 
 Why does `.fitted` have the same value for every male with income = 3? (First, show that this is in fact true. Then explain why?)
 
-
+```{r}
+model_1 %>%
+  augment(type.predict = "response") %>%
+  filter(gender == "male", income == "3") %>%
+  select(.fitted) %>%
+  unique()
+```
+Since our model only takes a binary gender variable and an income bracket variable with 5 levels into account, it makes sense that it predicts the same probability of voting for a democrat for all males at a certain income level.
 
 # Scene 4
 
@@ -85,10 +142,38 @@ Use the `newdata` argument in `augment` on `model_1` to make estimates for new d
 
 Use `mutate` to create confidence intervals using `.fitted` and `2 * .se.fit`.
 
+```{r}
+new_predictions <- model_1 %>%
+  augment(type.predict = "response", 
+          newdata = tibble(income = rep(mean(nes$income), 2), 
+                           gender = c("male", "female"))
+          ) %>%
+  mutate(conf.low = .fitted - 2*.se.fit,
+         conf.high = .fitted + 2*.se.fit)
+```
+
+
 Then use `ggplot` to plot the estimates with their confidence intervals. `geom_errorbar()` is a handy tool for that.
+
+```{r}
+new_predictions %>%
+  ggplot(aes(x = gender, y = .fitted, ymin = conf.low, ymax = conf.high)) +
+  geom_point(size = 3) +
+  geom_errorbar(color = "red") +
+  theme_classic() +
+  labs(title = "Probability of Voting for a Democratic Presidential Candidate",
+       subtitle = "For average-income voters",
+       x = "Gender",
+      y = "Predicted probability of voting for Democrats")
+```
+
 
 (Optional!) Is this estimate a could forecast of what such a person would actually do? Probably not! An individual can't vote 0.52. You can only either do 0 or do 1. There is no 0.52 option. This highlights the difference between the endlying (and never observable, even in theory) probability of voting, which is on a 0 to 1 scale, and the actual vote, which is only 0 or 1, never in between. With that as background, what do you predict that these two people will do? How can you get R to show this prediction? 
 
+```{r}
+new_predictions %>%
+  mutate(predicted_vote = ifelse(.fitted >= 0.5, "Democrat", "Republican"))
+```
 
 
 # Scene 5
